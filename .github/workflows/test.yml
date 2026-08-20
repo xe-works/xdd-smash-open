@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # 22, not the 20 in package.json engines: `node --test` only expands
           # the glob patterns in the test script from 21 on.
