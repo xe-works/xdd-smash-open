@@ -1,0 +1,30 @@
+{
+  "enabled": false,
+  "redisUrl": "",
+  "regions": {
+    "us": {
+      "host": "",
+      "dpi": ""
+    },
+    "apac": {
+      "host": "",
+      "dpi": ""
+    },
+    "eu": {
+      "host": "",
+      "dpi": ""
+    }
+  },
+  "awaitFetch": true,
+  "timeoutMs": 30,
+  "ttlMs": 43200000,
+  "coarseTtlMs": 3600000,
+  "maxTtlMs": 86400000,
+  "reporting": {
+    "enabled": true,
+    "host": "reports-s2s.intentiq.com"
+  },
+  "targets": [
+    {}
+  ]
+}
