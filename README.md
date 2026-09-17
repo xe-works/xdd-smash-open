@@ -37,8 +37,7 @@ writing your own, and we keep adding to that free set.
 ### Audiences
 
 The xdd-smash framework is the same wherever it sits in a request. What changes 
-is what you would use it for. These pages cover each side of the market, 
-with examples:
+is what you would use it for. 
 
 * [Ad Network](docs/audiences/ad-network.md) 
 * [Curator](docs/audiences/curator.md) 
