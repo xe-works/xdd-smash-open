@@ -34,6 +34,18 @@ the general guide for doing that is not written yet:
 ones a working bidder needs, plus reference implementations to copy from when
 writing your own, and we keep adding to that free set.
 
+### Audiences
+
+The xdd-smash framework is the same wherever it sits in a request. What changes 
+is what you would use it for. These pages cover each side of the market, 
+with examples:
+
+* [Ad Network](docs/audiences/ad-network.md) 
+* [Curator](docs/audiences/curator.md) 
+* [Performance Network](docs/audiences/performance-network.md) 
+* [Publisher](docs/audiences/publisher.md) 
+* [SSP](docs/audiences/ssp.md) 
+
 ### Latency
 
 Pipeline overhead depends on the deployment. On the deployments we run it is
