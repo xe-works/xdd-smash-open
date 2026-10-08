@@ -100,6 +100,7 @@ export class BidContext {
       model: null,
       ua: null,
       ip: null,
+      ipv6: null,
       ifa: null,
       lang: null,
       dnt: 0,
@@ -129,6 +130,8 @@ export class BidContext {
       gdpr: null,
       consent: null,
       usPrivacy: null,
+      gpp: null,
+      gppSid: null,
       ...privacy,
     };
 
