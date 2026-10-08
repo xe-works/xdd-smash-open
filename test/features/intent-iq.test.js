@@ -5,7 +5,7 @@ import { cacheKeyFor, cohortOf, identityFor, hasRealIfa, IDTYPE } from '../../fe
 import { createThrottle } from '../../features/intent-iq/throttle.js';
 import { ttlFor, abTestUuidFor, entryFor } from '../../features/intent-iq/cache.js';
 import { buildRdata, createConsumer } from '../../features/intent-iq/reporting.js';
-import { s2sPath, reportPath, interpretEids } from '../../features/intent-iq/client.js';
+import { s2sPath, reportPath, interpretEids, privacyParams } from '../../features/intent-iq/client.js';
 
 const TTL_CFG = { ttlMs: 43_200_000, coarseTtlMs: 3_600_000, maxTtlMs: 86_400_000 };
 
@@ -462,4 +462,52 @@ test('the consumer survives a rejected report without throwing', async () => {
 test('buildRdata refuses a non-numeric price rather than reporting nonsense', () => {
   assert.equal(buildRdata({ ...IIQ_CTX, price: null }), null);
   assert.equal(buildRdata({ ...IIQ_CTX, price: 'free' }), null);
+});
+
+test('privacyParams puts gdpr in the query, where they actually read it', () => {
+  const q = params(s2sPath('1', {}, privacyParams({ gdpr: 1, consent: 'C-STR' })));
+  assert.equal(q.get('gdpr'), '1');
+  assert.equal(q.get('gdpr_consent'), 'C-STR');
+});
+
+test('privacyParams treats gdpr as truthy, not as the number one', () => {
+  // The parser passes regs.gdpr through unchanged and exchanges do send a
+  // boolean. A strict comparison silently dropped those requests.
+  assert.deepEqual(privacyParams({ gdpr: true, consent: 'C' }), [['gdpr', 1], ['gdpr_consent', 'C']]);
+  assert.deepEqual(privacyParams({ gdpr: 0, consent: 'C' }), [], 'no flag, nothing to send');
+  assert.deepEqual(privacyParams({}), []);
+});
+
+test('privacyParams forwards the US signals', () => {
+  const q = params(s2sPath('1', {}, privacyParams({ usPrivacy: '1YNN', gpp: 'GPP-STR', gppSid: [7, 8] })));
+  assert.equal(q.get('us_privacy'), '1YNN');
+  assert.equal(q.get('gpp'), 'GPP-STR');
+  assert.equal(q.get('gpp_sid'), '7,8', 'section ids travel as one comma-separated value');
+});
+
+test('s2sPath repeats an array value in order', () => {
+  // How the 3rdpcid/3rddpi pairs travel: the nth of one belongs to the nth of
+  // the other, so the order within each list is the whole contract.
+  const path = s2sPath('1', { '3rdpcid': ['a', 'b'], '3rddpi': [10, 20] });
+  assert.deepEqual(params(path).getAll('3rdpcid'), ['a', 'b']);
+  assert.deepEqual(params(path).getAll('3rddpi'), ['10', '20']);
+});
+
+test('interpretEids reads the qps flag on an otherwise ordinary 200', () => {
+  // A refusal comes back as a valid, empty-looking answer. Without the flag it
+  // is cached as data and the limiter is told it succeeded.
+  const res = { status: 'ok', code: 200, body: '{"data":{"eids":[]},"qps":true,"cttl":5000}' };
+  assert.deepEqual(interpretEids(res), { outcome: 'qps', cttl: 5000 });
+});
+
+test('interpretEids does not mistake a plain empty answer for a refusal', () => {
+  const res = { status: 'ok', code: 200, body: '{"data":{"eids":[]},"qps":false,"cttl":600000}' };
+  assert.equal(interpretEids(res).outcome, 'ok');
+});
+
+test('ttlFor honours cttl on the cohort tier when no extra ceiling is configured', () => {
+  const noCoarse = { ttlMs: 43_200_000, maxTtlMs: 86_400_000 };
+  assert.equal(ttlFor(72 * 3600_000, 'cohort', noCoarse), 72 * 3600_000 > 86_400_000 ? 86_400_000 : 72 * 3600_000);
+  assert.equal(ttlFor(7_200_000, 'cohort', noCoarse), 7_200_000, 'their number stands');
+  assert.equal(ttlFor(7_200_000, 'cohort', TTL_CFG), 3_600_000, 'and is capped again when one is set');
 });

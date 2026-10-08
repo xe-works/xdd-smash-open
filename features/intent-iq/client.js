@@ -51,10 +51,36 @@ function get(host, path, headers, timeoutMs) {
   });
 }
 
-export function s2sPath(dpi, identity) {
+// An array value becomes repeated parameters in order, which is how the
+// 3rdpcid/3rddpi pairs travel: the nth of one belongs to the nth of the other.
+export function s2sPath(dpi, identity, extra = []) {
   const parts = [...S2S_STATIC, ['dpi', dpi]];
-  for (const [k, v] of Object.entries(identity)) parts.push([k, v]);
-  return `${PATH}?${query(parts)}`;
+  for (const [k, v] of Object.entries(identity)) {
+    if (Array.isArray(v)) for (const one of v) parts.push([k, one]);
+    else parts.push([k, v]);
+  }
+  return `${PATH}?${query([...parts, ...extra])}`;
+}
+
+// Eligibility is decided from the request IP, not from device.geo.country, so a
+// request whose declared country and IP disagree can still require these. Sent
+// whenever the request carries them rather than only for the eu region.
+export function privacyParams(privacy = {}) {
+  const parts = [];
+
+  // Truthy rather than === 1: the parser passes a boolean gdpr through
+  // unchanged, and exchanges do send one.
+  if (privacy.gdpr) {
+    parts.push(['gdpr', 1]);
+    if (privacy.consent) parts.push(['gdpr_consent', privacy.consent]);
+  }
+  if (privacy.usPrivacy) parts.push(['us_privacy', privacy.usPrivacy]);
+  if (privacy.gpp) parts.push(['gpp', privacy.gpp]);
+
+  const sid = privacy.gppSid;
+  if (sid != null && sid !== '') parts.push(['gpp_sid', Array.isArray(sid) ? sid.join(',') : sid]);
+
+  return parts;
 }
 
 export function reportPath(dpi, rdata) {
@@ -65,7 +91,7 @@ export function reportPath(dpi, rdata) {
 // the QPS refusal arrives in the body of an otherwise fine response.
 export function interpretEids(res) {
   if (res.status !== 'ok') return { outcome: res.status === 'timeout' ? 'timeout' : 'error' };
-  if (res.code === 302) return { outcome: 'nodata' };
+  if (res.code === 302) return { outcome: 'nodata', eids: [], abTestUuid: null };
   if (res.body?.includes(QPS_MARKER)) return { outcome: 'qps' };
   if (res.code >= 400) return { outcome: 'error' };
 
@@ -76,6 +102,12 @@ export function interpretEids(res) {
     return { outcome: 'badjson' };
   }
 
+  // A rate refusal arrives as an ordinary 200 with valid JSON, so without this
+  // flag it is indistinguishable from a genuine empty answer — and would be
+  // cached as data while telling the throttle it succeeded. The short cttl that
+  // comes with it is the back-off interval.
+  if (body.qps === true) return { outcome: 'qps', cttl: body.cttl };
+
   return {
     outcome: 'ok',
     eids: body.isOptedOut ? [] : (body.data?.eids ?? []),
@@ -84,9 +116,12 @@ export function interpretEids(res) {
   };
 }
 
-export async function fetchEids({ host, dpi, identity, gdpr, consent, timeoutMs }) {
-  const headers = gdpr === 1 && consent ? { 'gdpr-consent': consent } : {};
-  return interpretEids(await get(host, s2sPath(dpi, identity), headers, timeoutMs));
+// The consent string is accepted either as a query parameter or as this header;
+// the gdpr flag itself is only read from the query, so privacyParams carries it.
+export async function fetchEids({ host, dpi, identity, privacy, timeoutMs }) {
+  const headers = privacy?.gdpr && privacy?.consent ? { 'gdpr-consent': privacy.consent } : {};
+  const path = s2sPath(dpi, identity, privacyParams(privacy));
+  return interpretEids(await get(host, path, headers, timeoutMs));
 }
 
 export async function reportImpression({ host, dpi, rdata, timeoutMs }) {

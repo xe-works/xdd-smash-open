@@ -38,6 +38,13 @@ const fetchMs = defineHistogram(
 
 export const throttle = createThrottle({ redis: () => getRedis(_cfg.redisUrl) });
 
+// What the limiter is allowed to learn from. A timeout says our own budget was
+// short, not that they are overloaded, so it teaches nothing and must not drag
+// the rate down. nodata is a complete answer that happens to be empty.
+const FETCH_LABEL = { timeout: 'fetch_timeout', qps: 'fetch_qps', nodata: 'fetch_nodata', badjson: 'fetch_badjson' };
+
+const THROTTLE_OUTCOME = { ok: 'ok', nodata: 'ok', qps: 'qps', error: 'error', badjson: 'error', timeout: 'ignore' };
+
 function record(ctx, result, tier = 'none') {
   total.inc({
     endpoint_id: ctx.dsp?.endpointId ?? ctx.dsp?.id ?? 'unknown',
@@ -84,17 +91,19 @@ async function fetchAndStore(ctx, cfg, redis, region, keyed, deps) {
     host: region.host,
     dpi: region.dpi,
     identity: identityFor(ctx),
-    gdpr: ctx.privacy?.gdpr,
-    consent: ctx.privacy?.consent,
+    privacy: ctx.privacy,
     timeoutMs: cfg.timeoutMs,
   });
   fetchMs.observe({ outcome: res.outcome }, Date.now() - started);
 
-  deps.gate.record(region.dpi, res.outcome === 'ok' ? 'ok' : res.outcome === 'qps' ? 'qps' : 'error');
-  if (res.outcome !== 'ok') return res;
+  deps.gate.record(region.dpi, THROTTLE_OUTCOME[res.outcome] ?? 'error');
+
+  // A no-data answer is an answer: storing it stops us asking again for a device
+  // they have nothing on. A refusal is not, and must never reach the cache.
+  if (res.outcome !== 'ok' && res.outcome !== 'nodata') return res;
 
   try {
-    const entry = entryFor(res.eids, res.abTestUuid, region.dpi);
+    const entry = entryFor(res.eids, res.abTestUuid, region.dpi, region.region);
     await write(redis, keyed.key, entry, ttlFor(res.cttl, keyed.tier, cfg));
   } catch { /* the eids are still usable */ }
 
@@ -108,6 +117,13 @@ export async function _run(ctx, cfg, redis, deps = {}) {
     record(ctx, 'skip_no_target');
     return ctx;
   }
+
+  // No basis to process: neither call them nor attach anything already cached.
+  // dnt and lmt are an explicit refusal, and a gdpr request with no consent
+  // string has nothing to stand on. A cache hit is processing too, so both gates
+  // sit ahead of the lookup rather than only ahead of the call.
+  if (ctx.device?.dnt === 1 || ctx.device?.lmt === 1) { record(ctx, 'skip_optout'); return ctx; }
+  if (ctx.privacy?.gdpr && !ctx.privacy?.consent) { record(ctx, 'skip_no_consent'); return ctx; }
 
   const keyed = cacheKeyFor(ctx);
   if (!keyed) { record(ctx, 'skip_no_key'); return ctx; }
@@ -141,7 +157,7 @@ export async function _run(ctx, cfg, redis, deps = {}) {
 
   const res = await fetchAndStore(ctx, cfg, redis, region, keyed, d);
   if (res.outcome !== 'ok') {
-    record(ctx, res.outcome === 'timeout' ? 'fetch_timeout' : 'fetch_error', keyed.tier);
+    record(ctx, FETCH_LABEL[res.outcome] ?? 'fetch_error', keyed.tier);
     return ctx;
   }
 

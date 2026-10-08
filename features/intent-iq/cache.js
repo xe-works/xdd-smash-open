@@ -1,23 +1,28 @@
-// Entries hold the dpi that fetched them. eids are a property of the user and
-// travel between accounts, but abTestUuid identifies one account's response —
-// reporting someone else's would corrupt their measurement, so the reader only
-// uses it when the dpi matches. Omitting it is allowed by the reporting spec.
-export function entryFor(eids, abTestUuid, dpi) {
-  return { eids: eids ?? [], abTestUuid: abTestUuid ?? null, dpi: dpi ?? null };
+// Entries hold the dpi that fetched them and the region they were fetched from.
+// The region is stored rather than derived at report time because the entry
+// outlives the request that created it: on a hit the country being served can
+// differ from the country that populated it, and the ifa and iiquid tiers carry
+// no country in the key at all.
+export function entryFor(eids, abTestUuid, dpi, region) {
+  return { eids: eids ?? [], abTestUuid: abTestUuid ?? null, dpi: dpi ?? null, region: region ?? null };
 }
 
 export function abTestUuidFor(entry, dpi) {
   return entry?.dpi && entry.dpi === dpi ? entry.abTestUuid : null;
 }
 
-// cttl is theirs to set; cap it so one bad value cannot pin stale eids for
-// days. The cohort tier is a bucket of devices behind one IP, not a device, so
-// it never outlives coarseTtlMs.
+// cttl is chosen per response and is the only field saying how long that answer
+// stays true, so it is used as given. maxTtlMs stays as a single guard against
+// an absurd value, nothing below it shortens the entry. coarseTtlMs is an
+// optional extra ceiling for the cohort tier, which is a bucket of devices
+// behind one IP rather than a device; it is off unless configured.
 export function ttlFor(cttl, tier, cfg) {
   const n = Number(cttl);
   const base = Number.isFinite(n) && n > 0 ? n : cfg.ttlMs;
   const capped = Math.min(base, cfg.maxTtlMs);
-  return tier === 'cohort' ? Math.min(capped, cfg.coarseTtlMs) : capped;
+
+  const coarse = Number(cfg.coarseTtlMs);
+  return tier === 'cohort' && Number.isFinite(coarse) && coarse > 0 ? Math.min(capped, coarse) : capped;
 }
 
 export async function read(redis, key) {

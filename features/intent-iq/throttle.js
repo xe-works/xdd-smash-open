@@ -93,6 +93,10 @@ export function createThrottle({ redis = () => null, now = () => Date.now() } = 
   }
 
   function record(dpi, outcome) {
+    // Nothing to learn from: a timeout is evidence about our own budget, not
+    // about their capacity, and counting it either way would move the rate.
+    if (outcome === 'ignore') return;
+
     const st = stateOf(dpi);
     if (outcome === 'qps') st.qps++;
     else if (outcome === 'error') st.err++;

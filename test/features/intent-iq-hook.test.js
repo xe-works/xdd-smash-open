@@ -207,7 +207,7 @@ test('a fetch attaches eids, caches them, and records the account that fetched',
 
   const [write] = redis.calls.set;
   assert.equal(write.k, 'iiq:ifa:DEVICE-1');
-  assert.deepEqual(JSON.parse(write.v), { eids: EIDS, abTestUuid: 'AB-2', dpi: '111' });
+  assert.deepEqual(JSON.parse(write.v), { eids: EIDS, abTestUuid: 'AB-2', dpi: '111', region: 'us' });
   assert.equal(write.opts.PX, 600_000, 'their cttl is honoured');
   assert.equal(c._trackExt.iiq.abTestUuid, 'AB-2');
 });
@@ -296,6 +296,75 @@ test('gdpr traffic goes to the gdpr account and carries the consent string', asy
 
   assert.equal(fetch.calls[0].host, 'gdpr.example');
   assert.equal(fetch.calls[0].dpi, '333');
-  assert.equal(fetch.calls[0].gdpr, 1);
-  assert.equal(fetch.calls[0].consent, 'CONSENT-STR');
+  assert.equal(fetch.calls[0].privacy.gdpr, 1);
+  assert.equal(fetch.calls[0].privacy.consent, 'CONSENT-STR');
+});
+
+const recordingGate = () => {
+  const seen = [];
+  return { admit: () => true, record: (_dpi, outcome) => seen.push(outcome), seen };
+};
+
+// The store is populated on purpose: if either gate moves back behind the cache
+// lookup, the hit attaches eids and these fail rather than passing quietly.
+const STORED = JSON.stringify({ eids: EIDS, abTestUuid: null, dpi: '111', region: 'us' });
+
+test('an explicit opt-out stops everything, the cached ids included', async () => {
+  for (const field of ['dnt', 'lmt']) {
+    const c = ctx();
+    c.device[field] = 1;
+    const redis = redisWith(new Map([['iiq:ifa:DEVICE-1', STORED]]));
+    const fetch = fetchStub({ outcome: 'ok', eids: EIDS });
+
+    await _run(c, cfgWith({}), redis, { fetch, gate: okGate });
+
+    assert.equal(fetch.calls.length, 0, `${field}: not called`);
+    assert.equal(c.patch('user.ext.eids'), undefined, `${field}: nothing attached`);
+    assert.equal(redis.calls.set.length, 0, `${field}: nothing written`);
+  }
+});
+
+test('gdpr with no consent string stops everything: attaching cached ids is processing too', async () => {
+  const c = ctx({ country: 'GBR' });
+  c.privacy = { gdpr: 1, consent: null };
+  const redis = redisWith(new Map([['iiq:ifa:DEVICE-1', STORED]]));
+  const fetch = fetchStub({ outcome: 'ok', eids: EIDS });
+
+  await _run(c, cfgWith({}), redis, { fetch, gate: okGate });
+
+  assert.equal(fetch.calls.length, 0, 'no call without a legal basis');
+  assert.equal(c.patch('user.ext.eids'), undefined);
+});
+
+test('a rate refusal is not cached and tells the throttle to back off', async () => {
+  const c = ctx();
+  const redis = redisWith();
+  const gate = recordingGate();
+
+  await _run(c, cfgWith({}), redis, { fetch: fetchStub({ outcome: 'qps', cttl: 5_000 }), gate });
+
+  assert.equal(redis.calls.set.length, 0, 'a refusal is not an answer');
+  assert.deepEqual(gate.seen, ['qps']);
+  assert.equal(c.patch('user.ext.eids'), undefined);
+});
+
+test('a timeout teaches the throttle nothing', async () => {
+  const c = ctx();
+  const gate = recordingGate();
+
+  await _run(c, cfgWith({}), redisWith(), { fetch: fetchStub({ outcome: 'timeout' }), gate });
+
+  assert.deepEqual(gate.seen, ['ignore'], 'evidence about our budget, not their capacity');
+});
+
+test('a no-data answer is cached and counts as a success', async () => {
+  const c = ctx();
+  const redis = redisWith();
+  const gate = recordingGate();
+
+  await _run(c, cfgWith({}), redis, { fetch: fetchStub({ outcome: 'nodata', eids: [], abTestUuid: null }), gate });
+
+  assert.equal(redis.calls.set.length, 1, 'an empty answer is still an answer');
+  assert.deepEqual(JSON.parse(redis.calls.set[0].v).eids, []);
+  assert.deepEqual(gate.seen, ['ok'], 'complete, not an error');
 });
