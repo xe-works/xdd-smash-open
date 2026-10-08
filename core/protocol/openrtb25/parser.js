@@ -16,6 +16,7 @@ export function parse(body, signal) {
     ssp: signal.ssp,
     dsp: signal.dsp,
     destination: signal.destination,
+    ext: signal.ext,
     signals: signal.signals,
     tmax: body.tmax ?? 0,
     raw: body,

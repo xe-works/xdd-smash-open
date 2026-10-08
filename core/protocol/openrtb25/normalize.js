@@ -36,6 +36,7 @@ function buildSmashMeta(ctx) {
     pipeline: ctx.meta.pipeline?.length ? ctx.meta.pipeline : undefined,
     warnings: ctx.meta.warnings?.length ? ctx.meta.warnings : undefined,
     errors: ctx.meta.errors?.length ? ctx.meta.errors : undefined,
+    ext: ctx._reportExt ?? undefined,
   };
 }
 

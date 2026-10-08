@@ -2,6 +2,7 @@ import http from 'node:http';
 import { unlinkSync, chmodSync } from 'node:fs';
 import { pipeline } from './pipeline.js';
 import { registry as metricsRegistry } from './metrics.js';
+import { gunzipSync } from 'node:zlib';
 
 // The server is a thin dispatcher over the route table (core/router.js). Core
 // endpoints (the bid POST and /metrics) are registered as ordinary routes via
@@ -104,13 +105,38 @@ export function registerCoreRoutes(router, registry, config) {
   });
 }
 
-function readBody(req) {
+// Content-Encoding is the caller's only declaration that the body is
+// compressed, so it decides how to read it. An encoding we do not implement
+// has to fail as itself: handed to JSON.parse as bytes it reads as malformed
+// JSON, which points at the wrong thing.
+const BODY_DECODERS = {
+  gzip: gunzipSync,
+  'x-gzip': gunzipSync,
+  identity: buf => buf,
+};
+
+export function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     req.on('data', chunk => chunks.push(chunk));
     req.on('end', () => {
+      const encoding = (req.headers['content-encoding'] ?? 'identity').trim().toLowerCase();
+      const decode = BODY_DECODERS[encoding];
+      if (!decode) {
+        reject(new Error(`unsupported content-encoding: ${encoding}`));
+        return;
+      }
+
+      let raw;
       try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString()));
+        raw = decode(Buffer.concat(chunks));
+      } catch {
+        reject(new Error(`could not decode ${encoding} body`));
+        return;
+      }
+
+      try {
+        resolve(JSON.parse(raw.toString()));
       } catch {
         reject(new Error('invalid JSON'));
       }

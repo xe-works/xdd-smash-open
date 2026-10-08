@@ -168,3 +168,19 @@ test('device fields stay null without sua or plain values', () => {
   assert.equal(ctx.device.browsers, null);
   assert.equal(ctx.device.type, null);
 });
+
+test('inventory names which inventory object the request carried', () => {
+  assert.equal(parse({ imp: [], app: { bundle: 'com.x' } }, signal).inventory, 'app');
+  assert.equal(parse({ imp: [], site: { page: 'https://x.com' } }, signal).inventory, 'site');
+  assert.equal(parse({ imp: [], dooh: {} }, signal).inventory, 'dooh');
+  assert.equal(parse({ imp: [] }, signal).inventory, null);
+});
+
+test('inventory does not depend on the optional fields inside app or site', () => {
+  // bundle and page are both optional, so deriving app-vs-site from them
+  // misreads a request that omits them.
+  assert.equal(parse({ imp: [], app: { name: 'Some App' } }, signal).inventory, 'app');
+  assert.equal(parse({ imp: [], site: { domain: 'x.com' } }, signal).inventory, 'site');
+  assert.equal(parse({ imp: [], app: {} }, signal).inventory, 'app');
+  assert.equal(parse({ imp: [], site: {} }, signal).inventory, 'site');
+});

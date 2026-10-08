@@ -75,3 +75,21 @@ test('passes signal ssp and dsp to ctx', () => {
   assert.equal(signal.ssp.id, '100');
   assert.equal(signal.ssp.knownBidder, 'pubmatic');
 });
+
+test('carries ext.smash.ext through as caller data', () => {
+  const body = {
+    ext: { smash: {
+      dsp: { id: 1, destination: { url: 'https://d.example' } },
+      ext: { client: 'adoptlabs', endpoint: 'http://smash.adoptlabs.live/' },
+    }},
+  };
+  assert.deepEqual(readSignal(body).ext, {
+    client: 'adoptlabs',
+    endpoint: 'http://smash.adoptlabs.live/',
+  });
+});
+
+test('ext defaults to an empty object, so a feature can read it unguarded', () => {
+  const body = { ext: { smash: { dsp: { id: 1, destination: { url: 'https://d.example' } } } } };
+  assert.deepEqual(readSignal(body).ext, {});
+});

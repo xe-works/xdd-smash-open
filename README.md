@@ -2,53 +2,155 @@
 
 Own your RTB stack.
 
-Vendors sell white-label: your logo, their black box, their roadmap. You cannot read the code, so you cannot verify what happens to your requests — and when something is wrong, the consequences land on you, not on them. Their complexity is not an accident either. The harder the stack is to understand, the harder you are to replace.
+White-label vendors put your logo on their black box. You do not have access to the code, 
+so you cannot verify what happens to your requests, and when something goes wrong, 
+it goes wrong under your name, with your partners. Anything you need changed goes 
+into someone else's roadmap, behind someone else's customers.
 
-xdd-smash is the other option. An open framework you run yourself, plus a private copy of the repository, code review, and consulting from the people who wrote it. Cheaper than renting a platform, and nothing waits on someone else's roadmap.
+xdd-smash is another way: an open framework you run yourself.
 
-**One developer is enough to run it.** That is why simplicity matters here: independence you cannot staff is not independence.
-
-Trust in programmatic cannot be audited from the outside — you see what you sent, not what was forwarded. It stops being a problem when every participant runs their own stack. That is why this is open.
+RTB has parts that are genuinely hard, and the framework absorbs them, so 
+that building on it stays cheap: a feature is a function that takes a bid request 
+and returns it. Two runtime dependencies, no build step, plain ES modules on Node 22. 
+Small enough for one developer to own. 
 
 ---
 
 ## What it is
 
-A proxy RTB bidder. It sits between your ad management platform and your demand, runs a pipeline on every bid request, and returns the result.
+A proxy RTB bidder. It sits between your ad management platform and your demand, runs a
+pipeline on every bid request, and returns the result.
 
 ```
-SSP / SDK / etc -> Ad management platform (e.g. XE) -> xdd-smash -> DSP / demand
+SSP / SDK / etc -> ad management platform (e.g. Xeworks) -> xdd-smash -> DSP / demand
 ```
 
-It ships integrated with XE, an ad management platform, which brings ready-made features that are not part of the core. The core is a general framework: write features as hooks, drop a folder, and it is picked up at startup.
+It comes integrated with [Xeworks](https://xe.works), an ad management platform.
+Nothing in `core/` is tied to Xeworks, so it can sit behind something else, but
+the general guide for doing that is not written yet:
+[#25](https://github.com/xe-works/xdd-smash-open/issues/25).
+
+`core/` is the framework and stays deliberately small. The features here are the
+ones a working bidder needs, plus reference implementations to copy from when
+writing your own, and we keep adding to that free set.
+
+### Audiences
+
+The xdd-smash framework is the same wherever it sits in a request. What changes 
+is what you would use it for. 
+
+* [Ad Network](docs/audiences/ad-network.md) 
+* [Curator](docs/audiences/curator.md) 
+* [Performance Network](docs/audiences/performance-network.md) 
+* [Publisher](docs/audiences/publisher.md) 
+* [SSP](docs/audiences/ssp.md) 
+
+### Latency
+
+Pipeline overhead depends on the deployment. On the deployments we run it is
+about 0.5 ms, measured from Xeworks. For an independent deployment it depends on
+your topology and where the boxes sit, so ask us and we will work it out with you.
 
 ---
 
 ## Getting started
 
-Not written yet. Getting from a clone to a bid response should take minutes, and today it does not — see [#6](https://github.com/xe-works/xdd-smash-open/issues/6). Help is welcome there; it is the first thing anyone tries.
+Not written yet. Getting from a clone to a bid response should take minutes, and
+today it does not, see [#6](https://github.com/xe-works/xdd-smash-open/issues/6).
+Help is welcome there; it is the first thing anyone tries.
 
-Node 22 or newer, and the reference for the request shape is [docs/framework.md](docs/framework.md).
+Node 22 or newer, and the reference for the request shape is
+[docs/framework.md](docs/framework.md).
+
+Setup touches your supply, your demand and your infrastructure. 
+If something does not line up, open an issue for your case.
 
 ---
 
 ## For developers
 
-The building block is a **hook**: a function that receives the request context and either returns it to continue, or returns `null` for a no-bid.
+Every bid request runs through four stages. A hook is a function bound to one of
+them: it receives the request context, changes it, and returns it.
+
+```
+supply source  -->  prebid-ssp  -->  prebid-dsp  -->  DSP
+                                                       |
+supply source  <--  postbid-ssp <--  postbid-dsp  <----+
+```
+
+| Stage | When it runs | Typical use |
+|---|---|---|
+| `prebid-ssp` | request arrived, before the DSP request is built | validate supply, block bad traffic |
+| `prebid-dsp` | before the DSP request goes out | enrich, add DSP fields and auth |
+| `postbid-dsp` | the DSP responded | validate and filter bids |
+| `postbid-ssp` | before the response goes back | final filtering, creative wrapping |
+
+The context is the bid request already normalised into one shape, whatever the
+caller sent:
 
 ```js
+// features/my-feature/prebid-dsp.js
 export default function(ctx) {
-  return ctx;   // continue
-  return null;  // no-bid
+  if (ctx.impression.isVideo && ctx.privacy.gdpr === 1 && !ctx.privacy.consent) {
+    return null;                              // no-bid, the request stops here
+  }
+
+  ctx.set('imp.ext.bidder', { placement: ctx.dsp.params.placementId });
+  ctx.header('Authorization', `Bearer ${token}`);
+
+  return ctx;                                 // continue to the DSP
 }
 ```
 
-A **feature** is one or more hooks in a folder. Two kinds, and the difference is about failure:
+`ctx.set()` queues a patch on the outbound body rather than mutating the request
+you were handed, and `imp.*` paths broadcast to every impression. A no-bid is a
+real response body with an empty `seatbid`, never a null body and never a 204.
 
-- **Stateless** — no external dependencies, so there is little to fail.
-- **Stateful** — depends on Redis, a database, something over the network. Must be fail-open: if the dependency is unreachable, return `ctx` untouched. A bid is never lost to infrastructure.
+A **feature** is a directory under `features/`. Its `index.js` declares the
+stages it binds to, and every such directory is loaded at startup, so adding a
+feature is adding a directory with no wiring anywhere else:
 
-Fail-open is on you, not on the framework. A hook that throws is recorded and the request is dropped, so catch what you expect to fail and return `ctx` instead. Nothing is swallowed for you.
+```js
+// features/my-feature/index.js
+import hook from './prebid-dsp.js';
+
+export function register(registry) {
+  registry.register('prebid-dsp', null, hook, 'my-feature/prebid-dsp');
+  return { side: 'feature', bidder: 'my-feature', stage: 'prebid-dsp' };
+}
+```
+
+The `null` is the target: pass one to scope the hook to a bidder or a seat, and
+targets order execution from least to most specific. The returned descriptor is
+what the startup banner prints. DSP and SSP adapters usually skip all of this:
+drop `dsp/<bidder>/prebid-dsp.js` into `features/injector/` and the filename is
+the registration.
+
+Features come in two kinds, and the difference is what can fail:
+
+- **Stateless** — no external dependencies, so anything that throws
+  is a bug in your own code.
+- **Stateful** — depends on Redis, a database, something over the network.
+  Must be fail-open: if the dependency is unreachable, return `ctx`.
+  Done right, no bid is ever lost to infrastructure.
+
+Failing open is on you, not on the framework — nothing is caught silently 
+on your behalf. If a hook throws, the error is recorded in `ctx.meta.errors` 
+and the request ends as a no-bid. So catch what you expect to fail, 
+leave a note in `ctx.meta.warnings` and return `ctx`. 
+
+---
+
+## Your features stay yours
+
+Apache 2.0 does not require you to publish anything you build on it. 
+You work in a private fork of this repository: the features that are your 
+competitive edge live there, closed and owned by you, and they come back 
+here only if you decide to contribute them.
+
+The framework runs without us. You can bring us into that fork under contract 
+for code review, custom feature development, deployment, hosting, 
+or a second opinion on an integration. Write to dima@xe.works.
 
 ### Docs
 
@@ -70,5 +172,5 @@ feature modules, services, tests, documentation, and other material contained
 in this repository.
 
 Additional modules, integrations, managed hosting, implementation services,
-and support not contained in this repository may be offered separately under
-commercial terms.
+code review, and support not contained in this repository may be offered
+separately under commercial terms.

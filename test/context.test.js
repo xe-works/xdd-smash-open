@@ -82,10 +82,39 @@ test('header() and endpoint() collect the outbound overrides', () => {
 });
 
 test('timeLeft() subtracts elapsed time and the overhead, never going negative', () => {
+  // Backdated rather than measured: asserting against a live clock also passes
+  // when elapsed time is ignored entirely, which is the bug worth catching.
   const ctx = new BidContext({ tmax: 500 });
+  ctx.meta.startTime -= 100;
   const left = ctx.timeLeft(10);
-  assert.ok(left > 0 && left <= 490, `expected just under 490, got ${left}`);
+  assert.ok(left > 380 && left <= 390, `expected ~390, got ${left}`);
 
   const tight = new BidContext({ tmax: 5 });
   assert.equal(tight.timeLeft(100), 0, 'clamped at zero rather than reporting a negative budget');
+});
+
+test('report() collects feature data under a namespace', () => {
+  const ctx = makeCtx();
+  assert.equal(ctx.report('creativeGuard', { rejected: 2 }), ctx, 'chainable');
+  ctx.report('creativeGuard', { reason: 'no adm' });
+  ctx.report('other', { a: 1 });
+
+  assert.deepEqual(ctx._reportExt, {
+    creativeGuard: { rejected: 2, reason: 'no adm' },
+    other: { a: 1 },
+  });
+});
+
+test('report() is independent of track(): neither leaks into the other', () => {
+  const ctx = makeCtx();
+  ctx.track('iiq', { dpi: '123' });
+  ctx.report('creativeGuard', { rejected: 1 });
+
+  assert.equal(ctx.serialize(RES).ext.creativeGuard, undefined, 'not in the tracking token');
+  assert.equal(ctx._reportExt.iiq, undefined, 'tracked data is not reported');
+});
+
+test('ctx.ext exposes what the caller sent, and is never undefined', () => {
+  assert.deepEqual(new BidContext({ ext: { client: 'adoptlabs' } }).ext, { client: 'adoptlabs' });
+  assert.deepEqual(new BidContext({}).ext, {}, 'readable without a guard');
 });

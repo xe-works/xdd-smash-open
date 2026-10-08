@@ -5,14 +5,9 @@ one review before it merges. That applies to us as much as to you.
 
 ## Getting set up
 
-```bash
-npm ci
-npm test
-npm run lint
-npm run coverage   # tests again, with thresholds
-```
-
-Node 22 or newer — `package.json` `engines` now says so too.
+Not written yet — see [#6](https://github.com/xe-works/xdd-smash-open/issues/6).
+Getting from a clone to a running bidder should take minutes, and setting that
+out properly is its own piece of work. Help is welcome there.
 
 ## Where code goes
 
@@ -57,11 +52,6 @@ By submitting a contribution, you represent that you have the right to submit
 it under those terms. Do not submit material owned by an employer, client, or
 other third party unless you have the necessary permission.
 
-## Security
-
-Do not open a public issue for a vulnerability. See
-[SECURITY.md](SECURITY.md).
-
 ---
 
 ## For clients running xdd-smash
@@ -75,7 +65,7 @@ current without touching your feature work.
 There are two hosting arrangements. If **xdd hosts**, we manage the
 infrastructure and own uptime; deployment follows review, and a PR is not
 deployed until it is approved. If **you host**, infrastructure and deployments
-are yours. 
+are yours. Which one applies is agreed at contract time.
 
 | | |
 |--|--|

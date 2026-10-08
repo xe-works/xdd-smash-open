@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseResponse, buildResponse } from '../core/protocol/openrtb25/normalize.js';
+import { parseResponse, buildResponse, buildNoResponse } from '../core/protocol/openrtb25/normalize.js';
 
 const DSP_RESPONSE = {
   id: 'r1',
@@ -113,4 +113,26 @@ test('buildResponse includes meta in ext.smash', () => {
   const result = buildResponse(makeCtx(bids));
   assert.equal(result.ext.smash.requestId, 'req-1');
   assert.equal(result.ext.smash.dsp.latency, 50);
+});
+
+test('buildResponse carries reported feature data in ext.smash.ext', () => {
+  const ctx = makeCtx(parseResponse(DSP_RESPONSE));
+  ctx._reportExt = { creativeGuard: { rejected: [{ crid: 'cr1', reason: 'no adm' }] } };
+
+  const result = buildResponse(ctx);
+  assert.deepEqual(result.ext.smash.ext.creativeGuard.rejected, [{ crid: 'cr1', reason: 'no adm' }]);
+});
+
+test('a no-bid carries reported feature data too', () => {
+  const ctx = makeCtx([]);
+  ctx._reportExt = { creativeGuard: { rejected: 3 } };
+
+  const result = buildNoResponse(ctx);
+  assert.deepEqual(result.seatbid, [], 'still a no-bid');
+  assert.equal(result.ext.smash.ext.creativeGuard.rejected, 3);
+});
+
+test('ext.smash has no ext key when nothing was reported', () => {
+  const result = buildResponse(makeCtx(parseResponse(DSP_RESPONSE)));
+  assert.equal(result.ext.smash.ext, undefined);
 });

@@ -27,5 +27,9 @@ export function readSignal(body) {
     ssp: smash.ssp ? new Seat({ type: 'ssp', ...smash.ssp, params: smash.ssp.params ?? {} }) : null,
     dsp: new Seat({ type: 'dsp', ...smash.dsp, params: smash.dsp.params ?? {} }),
     destination: { url: smash.dsp.destination.url },
+    // Free-form data from whoever built the request. Anything outside dsp/ssp
+    // used to be dropped here, so a caller had no way to say something that was
+    // not about one seat — its own identity, for one.
+    ext: smash.ext ?? {},
   };
 }
