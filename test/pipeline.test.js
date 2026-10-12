@@ -245,3 +245,29 @@ test('storedResponse: postbid hook can block stored response', async () => {
   assert.ok(isNoBid(result));
   assert.equal(result.ext.smash.blockedBy, 'postbid-dsp');
 });
+
+test('core metrics carry the client the caller named', async () => {
+  // One install serves several seats, so every core metric has to say whose
+  // request it was. The caller states it in ext.smash.ext, which is the only
+  // place that is about the caller rather than about a seat.
+  const { registry: metrics } = await import('../core/metrics.js');
+
+  const body = makeBidRequest();
+  body.imp[0].ext.smash.ext = { client: 'acme' };
+  await pipeline(makeReq(), body, createRegistry(), makeClient({ status: 'ok', body: makeDspResponse() }));
+
+  const requests = await metrics.getSingleMetricAsString('smash_requests_total');
+  assert.match(requests, /client="acme"/);
+
+  const duration = await metrics.getSingleMetricAsString('smash_request_duration_milliseconds');
+  assert.match(duration, /client="acme"/);
+});
+
+test('a caller that names no client is counted, not dropped', async () => {
+  const { registry: metrics } = await import('../core/metrics.js');
+
+  await pipeline(makeReq(), makeBidRequest(), createRegistry(), makeClient({ status: 'ok', body: makeDspResponse() }));
+
+  const requests = await metrics.getSingleMetricAsString('smash_requests_total');
+  assert.match(requests, /client="unknown"/, 'an older caller still shows up, under a name that says so');
+});
