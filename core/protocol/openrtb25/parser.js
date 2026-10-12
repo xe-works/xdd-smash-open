@@ -44,6 +44,7 @@ export function parse(body, signal) {
       model: device.model ?? null,
       ua: device.ua ?? null,
       ip: device.ip ?? null,
+      ipv6: device.ipv6 ?? null,
       ifa: device.ifa ?? null,
       lang: device.language ?? null,
       dnt: device.dnt ?? 0,
@@ -71,6 +72,8 @@ export function parse(body, signal) {
       gdpr: regs.gdpr ?? regsExt.gdpr ?? null,
       consent: userExt.consent ?? null,
       usPrivacy: regs.us_privacy ?? regsExt.us_privacy ?? null,
+      gpp: regs.gpp ?? regsExt.gpp ?? null,
+      gppSid: regs.gpp_sid ?? regsExt.gpp_sid ?? null,
     },
 
     content: {
