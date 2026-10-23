@@ -71,6 +71,28 @@ test('tracked data stays nested, so it cannot be addressed as a flat metric labe
   assert.equal(out['ext.iiq.abTestUuid'], undefined);
 });
 
+test('header() and endpoint() collect the outbound overrides', () => {
+  const ctx = makeCtx();
+  assert.equal(ctx.header('Authorization', 'Basic x'), ctx, 'chainable');
+  ctx.header('X-Other', '1');
+  assert.equal(ctx.endpoint('https://override.example/bid'), ctx, 'chainable');
+
+  assert.deepEqual(ctx._headers, { Authorization: 'Basic x', 'X-Other': '1' });
+  assert.equal(ctx._endpoint, 'https://override.example/bid');
+});
+
+test('timeLeft() subtracts elapsed time and the overhead, never going negative', () => {
+  // Backdated rather than measured: asserting against a live clock also passes
+  // when elapsed time is ignored entirely, which is the bug worth catching.
+  const ctx = new BidContext({ tmax: 500 });
+  ctx.meta.startTime -= 100;
+  const left = ctx.timeLeft(10);
+  assert.ok(left > 380 && left <= 390, `expected ~390, got ${left}`);
+
+  const tight = new BidContext({ tmax: 5 });
+  assert.equal(tight.timeLeft(100), 0, 'clamped at zero rather than reporting a negative budget');
+});
+
 test('report() collects feature data under a namespace', () => {
   const ctx = makeCtx();
   assert.equal(ctx.report('creativeGuard', { rejected: 2 }), ctx, 'chainable');
