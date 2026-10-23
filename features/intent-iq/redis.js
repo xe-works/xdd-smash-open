@@ -31,9 +31,11 @@ export function getRedis(url, connectFn = connect) {
   try {
     pending = connectFn(url).then(client => {
       // reconnectStrategy is false, so a connection that drops never comes
-      // back. Without this the dead client is memoised for the life of the
-      // process and every later request fails against it.
+      // back. node-redis reports a server going away only as 'error' with
+      // isOpen false; 'end' fires solely on a close we asked for. Listening
+      // for 'end' alone kept a dead client until the process restarted.
       client.on('end', forget);
+      client.on('error', () => { if (client.isOpen === false) forget(); });
       return client;
     }).catch(() => { forget(); return null; });
   } catch {

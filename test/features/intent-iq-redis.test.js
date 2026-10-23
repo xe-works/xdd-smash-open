@@ -1,5 +1,6 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import net from 'node:net';
 import { getRedis, _reset } from '../../features/intent-iq/redis.js';
 
 // Refused immediately, so nothing here waits on a network.
@@ -41,8 +42,57 @@ test('a malformed url fails open', async () => {
 
 function fakeClient() {
   const handlers = {};
-  return { on: (event, fn) => { handlers[event] = fn; }, emit: event => handlers[event]?.() };
+  return {
+    isOpen: true,
+    on: (event, fn) => { (handlers[event] ??= []).push(fn); },
+    emit: event => handlers[event]?.forEach(fn => fn()),
+  };
 }
+
+// Answers +OK to every command, enough for node-redis to connect, and can be
+// killed like a restarting server.
+async function okServer() {
+  const sockets = new Set();
+  const server = net.createServer(sock => {
+    sockets.add(sock);
+    sock.on('data', buf => {
+      const commands = buf.toString().split('\r\n').filter(l => l.startsWith('*')).length;
+      sock.write('+OK\r\n'.repeat(commands));
+    });
+    sock.on('close', () => sockets.delete(sock));
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  return {
+    url: `redis://127.0.0.1:${server.address().port}`,
+    kill: () => new Promise(r => { sockets.forEach(s => s.destroy()); server.close(r); }),
+  };
+}
+
+test('a real client whose server restarts is forgotten, so the next call reconnects', async () => {
+  const srv = await okServer();
+  const first = await getRedis(srv.url);
+  assert.ok(first?.isReady, 'connected to the stand-in server');
+
+  await srv.kill();
+  await new Promise(r => setTimeout(r, 50));
+
+  assert.equal(first.isOpen, false, 'node-redis gives up: reconnectStrategy is false');
+  const next = getRedis(srv.url);
+  assert.notEqual(await next, first, 'the dead client is not handed out again');
+});
+
+test('a transient error on a live client keeps it', async () => {
+  const client = fakeClient();
+  const connected = getRedis(DEAD, async () => client);
+  await connected;
+
+  client.emit('error');
+  assert.equal(getRedis(DEAD, async () => fakeClient()), connected, 'still open, still memoised');
+
+  client.isOpen = false;
+  client.emit('error');
+  assert.notEqual(getRedis(DEAD, async () => fakeClient()), connected, 'closed after the error, forgotten');
+});
 
 test('a connection that drops is forgotten', async () => {
   const client = fakeClient();
